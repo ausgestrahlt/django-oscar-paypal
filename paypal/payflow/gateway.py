@@ -2,15 +2,13 @@
 Gateway module - this module should be ignorant of Oscar and could be used in a
 non-Oscar project.  All Oscar-related functionality should be in the facade.
 """
-from __future__ import unicode_literals
 import logging
 
 from django.conf import settings
 from django.core import exceptions
 
 from paypal import gateway
-from paypal.payflow import models
-from paypal.payflow import codes
+from paypal.payflow import codes, models
 
 logger = logging.getLogger('paypal.payflow')
 
@@ -66,6 +64,18 @@ def _submit_payment_details(trxtype, order_number, card_number, cvv, expiry_date
         'EMAIL': kwargs.get('user_email', ''),
         'PHONENUM': kwargs.get('billing_phone_number', ''),
     }
+
+    # Allow inclusion of optional parameters in transactions such as:
+    # dict(shipto_first_name='SHIPTOFIRSTNAME', ...)
+    #   OR
+    # dict(bncode='BUTTONSOURCE', ...)
+    OPTIONAL_PARAMS = getattr(settings, 'PAYPAL_PAYFLOW_OPTIONAL_PARAMS', dict())
+    if isinstance(OPTIONAL_PARAMS, dict):
+        # add optional parameters here
+        for key, name in OPTIONAL_PARAMS.items():
+            value = kwargs.get(key)
+            if value:
+                params.update({'{}'.format(name): value})
     return _transaction(params)
 
 
@@ -187,7 +197,11 @@ def _transaction(extra_params):
 
     logger.info("Performing %s transaction (trxtype=%s)",
                 codes.trxtype_map[trxtype], trxtype)
-    pairs = gateway.post(url, params)
+    pairs = gateway.post(
+        url,
+        '&'.join(['{}={}'.format(n, v) for n, v in params.items()]),
+        encode=False
+    )
 
     # Beware - this log information will contain the Payflow credentials
     # only use it in development, not production.
